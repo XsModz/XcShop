@@ -1,0 +1,503 @@
+You are a senior Node.js backend engineer, Telegram Bot API specialist,
+PostgreSQL database architect, Vercel deployment engineer, and reseller
+system designer.
+
+Build a complete, secure, deployable Telegram file-distribution bot
+named XcShop.
+
+The project must be production-ready, fully implemented, mobile-friendly
+to deploy through GitHub and Vercel, and must not depend on a separate
+web-based admin dashboard. All user, reseller, and administrator
+interactions must happen inside Telegram.
+
+Do not rename the project. Use XcShop consistently in all code, messages,
+package metadata, documentation, and interface text.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — TECHNOLOGY STACK
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Node.js 20+, JavaScript ES modules
+- Telegram Bot API via direct HTTPS (no polling, webhook only)
+- PostgreSQL via the pg package
+- Vercel serverless functions
+- GitHub for source control
+- No paid APIs required
+- No local file storage
+- No separate website or admin panel
+- No always-running process
+
+Use only real, current package versions. Do not invent package names,
+APIs, or configuration properties.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — DELIVERY RULES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate complete source code, not proposals or outlines.
+
+Every required file must be provided in full. Never use:
+- "Implement this later"
+- "Add your logic here"
+- "Rest of code omitted"
+- Empty functions or stubs
+- Fake buttons
+- Simulated database operations
+- Hardcoded sample data presented as real
+
+If a feature cannot be reliably implemented in this architecture,
+state the limitation clearly instead of faking it.
+
+Divide output into clearly numbered parts. Wait for "next part" before
+continuing. Do not skip files because of response length.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 3 — USER PANEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Main menu inline keyboard:
+  📂 Free Files
+  👑 VIP Files
+  🛒 My Purchases
+  👤 My Account
+  🔑 Redeem Key
+  🆘 Support
+
+Features:
+1. /start registers or updates the user in PostgreSQL.
+2. Welcome message shows user first name, safely HTML-escaped.
+3. Browse active Free files, paginated.
+4. Browse VIP files only when authorized.
+5. Browse by category with file counts shown.
+6. Display file title, category, tier, and description.
+7. Deliver files via Telegram copyMessage from STORAGE_CHAT_ID.
+8. Back and Home navigation on every screen.
+9. My Account shows: Telegram ID, username, VIP status, expiry,
+   active key grants, registration date.
+10. Redeem Key: user pastes a key string, system activates the
+    associated grant (VIP duration or specific file access).
+11. Support link via SUPPORT_USERNAME.
+12. Graceful handling of: empty categories, missing files, expired VIP,
+    blocked users, invalid keys, Telegram API errors.
+13. Paginate all lists. Never create keyboards with more than 8 rows.
+14. Validate every callback server-side. Never trust button visibility
+    as authorization.
+15. Blocked users receive a single clear rejection message and nothing
+    else.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — VIP ACCESS SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Supported durations: 1 day, 7 days, 30 days, lifetime.
+
+Admin commands:
+  /vip USER_ID DAYS
+  /viplife USER_ID
+  /unvip USER_ID
+  /vipinfo USER_ID
+
+Rules:
+- Validate all IDs and durations strictly.
+- Store expiry timestamps in PostgreSQL as TIMESTAMPTZ.
+- Check expiry on every protected action, not at login.
+- Lifetime VIP stored as a dedicated boolean column.
+- Revoking removes both timed and lifetime VIP.
+- Expired access never authorizes downloads.
+- Every operation reports result to the invoking admin.
+- Non-admins invoking admin commands get a silent rejection.
+- No payment processing in this version.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — KEY SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement a redeemable key system usable by admins and resellers.
+
+Key types:
+  VIP_1D   — grants 1 day VIP
+  VIP_7D   — grants 7 days VIP
+  VIP_30D  — grants 30 days VIP
+  VIP_LIFE — grants lifetime VIP
+  FILE_ID  — grants access to a single specific file
+
+Key properties stored in PostgreSQL:
+  - key string (unique, cryptographically random, URL-safe)
+  - key type
+  - target file_id (nullable, only for FILE_ID keys)
+  - created_by (user_id of admin or reseller who generated it)
+  - redeemed_by (user_id, nullable)
+  - redeemed_at (timestamptz, nullable)
+  - expires_at (timestamptz, nullable — key itself can expire unused)
+  - max_uses (integer, default 1)
+  - use_count (integer, default 0)
+  - is_active boolean
+
+Admin commands:
+  /genkey VIP_7D 5          — generate 5 x 7-day VIP keys
+  /genkey VIP_LIFE 1        — generate 1 lifetime key
+  /genkey FILE 88 3         — generate 3 keys for file ID 88
+  /keyinfo KEY_STRING       — inspect a key
+  /revokekey KEY_STRING     — deactivate a key
+  /listkeys                 — paginated list of all keys with status
+
+Reseller commands (if caller has reseller role):
+  /genkey VIP_7D 2          — only allowed key types reseller can generate
+                              are defined per reseller in their config
+  /mykeys                   — list keys the reseller created
+  /keystats                 — count used / unused in reseller's pool
+
+Redemption flow:
+1. User taps 🔑 Redeem Key and pastes the key string.
+2. System checks: key exists, is_active, not expired, use_count < max_uses.
+3. System checks: this user has not already redeemed this key if max_uses=1.
+4. Apply the grant atomically inside a transaction.
+5. Increment use_count, set redeemed_by and redeemed_at if max_uses=1.
+6. Confirm success to the user.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — RESELLER SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement a full reseller tier between admin and regular users.
+
+Reseller properties stored in PostgreSQL:
+  - user_id (FK to users)
+  - label (display name for admin panel)
+  - allowed_key_types (array: which key types they may generate)
+  - key_quota (integer: max keys they can hold active at once)
+  - keys_used (integer: count of keys generated this cycle)
+  - quota_reset_at (timestamptz: when quota resets)
+  - is_active boolean
+  - created_at, created_by
+
+Admin commands for reseller management:
+  /addreseller USER_ID LABEL
+  /removereseller USER_ID
+  /setquota USER_ID QUOTA
+  /resetquota USER_ID
+  /resellerinfo USER_ID
+  /listresellers
+
+Reseller panel (accessible via /reseller command for authorized users):
+
+  Menu:
+    🔑 Generate Keys
+    📋 My Keys
+    📊 My Stats
+    🏠 Main Menu
+
+  Generate Keys flow:
+    1. Bot shows allowed key types as inline buttons.
+    2. Reseller selects type.
+    3. Bot asks for quantity (1–10, enforced).
+    4. Bot checks quota. Rejects if quota would be exceeded.
+    5. Generates keys, stores in DB with created_by = reseller user_id.
+    6. Returns keys as a formatted message the reseller can copy.
+
+  My Keys: paginated list of keys the reseller generated,
+           showing key string, type, status, redeemed_by if used.
+
+  My Stats: total generated, total redeemed, quota remaining,
+            quota reset time.
+
+Rules:
+- Resellers cannot manage users, categories, files, or other resellers.
+- Resellers cannot grant VIP directly — only via keys.
+- Resellers cannot generate key types not in their allowed_key_types.
+- Resellers cannot exceed their key_quota.
+- A deactivated reseller loses access to the reseller panel immediately.
+- All reseller actions are logged with timestamp and user_id.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 7 — INSTANCE SYSTEM
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Implement a multi-instance architecture allowing one deployment to serve
+multiple logical "shops" under different bot tokens.
+
+Instance properties stored in PostgreSQL:
+  - id (serial)
+  - name (display name)
+  - bot_token (encrypted at rest using AES-256-GCM, key from ENCRYPTION_KEY env)
+  - admin_id (BIGINT, Telegram user who owns this instance)
+  - storage_chat_id (BIGINT)
+  - support_username (TEXT)
+  - webhook_secret (TEXT)
+  - is_active boolean
+  - created_at
+
+Single-instance mode (default):
+  BOT_TOKEN, ADMIN_ID, STORAGE_CHAT_ID are read from environment variables.
+  The instances table has one row. All features work as described elsewhere.
+
+Multi-instance mode (opt-in, enabled by MULTI_INSTANCE=true env var):
+  The webhook endpoint reads the bot token from the URL path:
+    /api/webhook/[instance_id]
+  Each request loads the correct instance config from the database.
+  Decrypts the bot token in memory only, never logs it.
+  All data (users, files, categories, keys, resellers) is scoped to
+  instance_id via a foreign key on every relevant table.
+
+Super-admin commands (only the SUPER_ADMIN_ID env var can invoke these):
+  /addinstance NAME ADMIN_ID STORAGE_CHAT_ID
+  /removeinstance INSTANCE_ID
+  /listinstances
+  /instanceinfo INSTANCE_ID
+  /setinstancetoken INSTANCE_ID BOT_TOKEN
+
+Each instance admin can manage their own instance's users, files,
+categories, VIP, keys, and resellers, but cannot see or touch other
+instances.
+
+In single-instance mode, ignore all instance routing logic and treat
+the single environment-variable config as the only instance. The
+instances table is still created but not actively used for routing.
+
+Encryption:
+  Provide a lib/crypto.js module with:
+    encryptToken(plaintext) → { iv, ciphertext, tag } stored as JSON string
+    decryptToken(storedJson) → plaintext
+  Use Node.js built-in crypto module only. No third-party crypto libraries.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8 — ADMIN PANEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/admin opens the admin panel. Only ADMIN_ID can access it.
+
+Menu:
+  📊 Statistics
+  👥 User Management
+  📂 Category Management
+  📁 File Management
+  👑 VIP Management
+  🔑 Key Management
+  🤝 Reseller Management
+  🏪 Instance Management  ← visible only to SUPER_ADMIN_ID
+  ⚙️ Settings
+  🏠 User Menu
+
+Statistics panel shows:
+  Total users / active last 7 days / blocked
+  Total files / free / VIP / hidden
+  Total categories / active / hidden
+  Current VIP users / lifetime VIP users
+  Total keys / active / redeemed / expired
+  Total resellers / active
+
+All stats from live SQL COUNT queries. No hardcoded values.
+
+User management:
+  /userinfo USER_ID    — full profile dump
+  /block USER_ID
+  /unblock USER_ID
+  Inline panel: search by ID, show grants, show key redemptions.
+
+Category management:
+  /addcategory NAME
+  /renamecategory ID NEW_NAME
+  /hidecategory ID
+  /showcategory ID
+  /deletecategory ID   — confirms via inline keyboard, reassigns or
+                         orphans files per defined policy (document it)
+
+File management:
+  /files               — paginated list
+  /fileinfo ID
+  /renamefile ID TITLE
+  /movefile ID CAT_ID
+  /settier ID free|vip
+  /hidefile ID
+  /showfile ID
+  /deletefile ID       — inline confirmation required
+
+VIP management: all commands from Section 4.
+
+Key management: all commands from Section 5.
+
+Reseller management: all commands from Section 6.
+
+Settings panel:
+  Show current SUPPORT_USERNAME, STORAGE_CHAT_ID (masked).
+  Provide /setsupport USERNAME command.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 9 — FILE UPLOAD WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Admin sends a file to the bot with caption format:
+  free | CategoryName | File Title
+  vip  | CategoryName | File Title
+
+Bot must:
+1. Verify sender is ADMIN_ID.
+2. Validate caption format strictly.
+3. Trim and validate title (1–128 chars).
+4. Locate or create category atomically (INSERT ... ON CONFLICT DO NOTHING).
+5. Copy message to STORAGE_CHAT_ID via copyMessage.
+6. Insert file record into PostgreSQL inside a transaction.
+7. On any failure: rollback DB, and if storage copy succeeded but DB
+   failed, attempt to delete the storage message and log the outcome.
+8. Confirm with file ID and storage message ID on success.
+9. On bad caption: reply with the correct format example.
+
+Supported media: document, photo, video, audio, voice, animation.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 10 — DATABASE SCHEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Provide schema.sql with these tables:
+
+  users
+  categories
+  files
+  file_grants
+  keys
+  resellers
+  reseller_log
+  instances
+  processed_updates
+
+All Telegram IDs as BIGINT. All timestamps as TIMESTAMPTZ.
+Parameterized SQL everywhere. Transactions for multi-step writes.
+Include all foreign keys, unique constraints, and indexes.
+Instance-scoped tables must have instance_id FK in multi-instance mode.
+Document the column purpose for every non-obvious column.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — WEBHOOK SECURITY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- POST only. Reject all other methods with 405.
+- Validate X-Telegram-Bot-Api-Secret-Token header.
+- Deduplicate update_id via processed_updates table.
+- Idempotent processing where possible.
+- No secrets in logs. No credentials in error responses.
+- pg pool sized for serverless (max 5 connections).
+- Validate all env vars at cold-start. Fail loudly if missing.
+- Execution timeout set to 25 seconds in vercel.json.
+- Return 200 immediately after dedup check passes; process inline.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 12 — PROJECT STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+XcShop/
+├── api/
+│   └── webhook.js
+├── lib/
+│   ├── bot.js
+│   ├── telegram.js
+│   ├── database.js
+│   ├── crypto.js
+│   ├── auth.js
+│   ├── keyboards.js
+│   ├── validators.js
+│   └── services/
+│       ├── users.js
+│       ├── categories.js
+│       ├── files.js
+│       ├── vip.js
+│       ├── grants.js
+│       ├── keys.js
+│       ├── resellers.js
+│       └── instances.js
+├── scripts/
+│   ├── setup-webhook.js
+│   └── setup-database.js
+├── schema.sql
+├── package.json
+├── vercel.json
+├── .env.example
+├── .gitignore
+└── README.md
+
+Every import path must match the actual file. No dead imports.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 13 — ENVIRONMENT VARIABLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Required:
+  BOT_TOKEN           — from @BotFather
+  ADMIN_ID            — numeric Telegram ID of primary admin
+  STORAGE_CHAT_ID     — private channel/group ID for file storage
+  DATABASE_URL        — PostgreSQL connection string
+  WEBHOOK_SECRET      — random string, 1–256 chars, alphanumeric+hyphen
+  BASE_URL            — your Vercel deployment URL, no trailing slash
+  SUPPORT_USERNAME    — Telegram username for support (no @)
+  ENCRYPTION_KEY      — 32-byte hex string for AES-256-GCM token encryption
+
+Optional:
+  SUPER_ADMIN_ID      — Telegram ID for instance management (defaults to ADMIN_ID)
+  MULTI_INSTANCE      — set to "true" to enable multi-instance routing
+
+Validate all required vars at startup. Throw with a clear message
+identifying the missing variable. Never log actual values.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 14 — VERCEL CONFIG
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+vercel.json must:
+- Route POST /api/webhook to api/webhook.js
+- Route POST /api/webhook/[id] to api/webhook.js for multi-instance
+- Set maxDuration to 25
+- Set nodejs20.x runtime
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 15 — UI AND BRANDING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Brand: XcShop
+Style: dark, premium feel using Telegram HTML and inline keyboards.
+- Consistent emoji use across all menus.
+- 🔒 prefix on VIP-locked items.
+- ✅ / ❌ on operation results.
+- Short, clear messages. No walls of text.
+- Paginate everything over 8 items.
+- Confirm before every destructive action via inline keyboard.
+- Never expose storage channel IDs or bot tokens to users.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 16 — GENERATION ORDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate in this exact order. Wait for "next part" between each:
+
+Part 1: Architecture + package.json + schema.sql + .env.example
+         + .gitignore + vercel.json
+Part 2: lib/database.js + lib/crypto.js + lib/telegram.js
+         + lib/validators.js + lib/auth.js
+Part 3: lib/keyboards.js + lib/services/users.js
+         + lib/services/categories.js + lib/services/files.js
+Part 4: lib/services/vip.js + lib/services/keys.js
+         + lib/services/grants.js + lib/services/resellers.js
+         + lib/services/instances.js
+Part 5: lib/bot.js + api/webhook.js
+Part 6: scripts/setup-database.js + scripts/setup-webhook.js + README.md
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 17 — ACCEPTANCE CRITERIA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Acceptable only if ALL of the following are true:
+
+✅ Named XcShop everywhere
+✅ Users can browse and retrieve permitted files
+✅ Free / VIP rules enforced server-side on every action
+✅ Admin-only operations reject all other callers silently
+✅ VIP expiry checked live, not cached
+✅ Keys generate, store, redeem, and expire correctly
+✅ Reseller quota enforced; resellers cannot exceed allowed key types
+✅ Instance routing works in both single and multi-instance mode
+✅ Bot tokens encrypted at rest; never logged
+✅ File uploads copy to storage and insert atomically with rollback
+✅ Duplicate webhook updates deduplicated
+✅ Compatible with Vercel serverless deployment
+✅ All files complete — no stubs, no placeholders, no fake results
+✅ No secrets in any committed file
+
+Start with Part 1. Do not summarize. Do not propose. Generate the code.
