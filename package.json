@@ -1,0 +1,19 @@
+{
+  "name": "XcShop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "XcShop Telegram file-distribution bot for Vercel and PostgreSQL",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "setup:db": "node scripts/setup-database.js",
+    "setup:webhook": "node scripts/setup-webhook.js",
+    "lint": "node --check api/webhook.js && node --check lib/*.js && node --check lib/services/*.js && node --check scripts/*.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "pg": "^8.17.0"
+  }
+}

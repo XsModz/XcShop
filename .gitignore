@@ -1,0 +1,16 @@
+/**
+ * Build and use with Vercel; no trailing slash in BASE_URL.
+ */
+node_modules/
+.env
+.env.local
+.env.production
+.vercel/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+coverage/
+dist/
+*.log
